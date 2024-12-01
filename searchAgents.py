@@ -368,29 +368,45 @@ class CornersProblem(search.SearchProblem):
         return len(actions)
 
 
-
 def cornersHeuristic(state, problem):
-    position, corners_visited = state
-    corners = problem.corners
+    position, visited_corners = state
     
-    # Filter unvisited corners
-    remaining_corners = [corner for i, corner in enumerate(corners) if not corners_visited[i]]
+    # Find unvisited corners
+    unvisited_corners = [corner for corner, is_visited in zip(problem.corners, visited_corners) if not is_visited]
     
-    if not remaining_corners:
+    # If all corners are visited, return 0
+    if not unvisited_corners:
         return 0
     
-    # If only one corner remains, return distance to that corner
-    if len(remaining_corners) == 1:
-        return util.manhattanDistance(position, remaining_corners[0])
-    
-    # Calculate maximum distance considering inter-corner connections
-    max_distance = max(
-        max(util.manhattanDistance(position, corner) for corner in remaining_corners),
-        max(util.manhattanDistance(c1, c2) for i, c1 in enumerate(remaining_corners) 
-            for c2 in remaining_corners[i+1:] if c1 != c2)
+    # Compute the minimum distance to the closest unvisited corner
+    min_dist_to_corner = min(
+        abs(position[0] - corner[0]) + abs(position[1] - corner[1]) 
+        for corner in unvisited_corners
     )
     
-    return max_distance
+    if len(unvisited_corners) > 1:
+        # Use the minimum spanning tree distance as an estimate
+        min_spanning_tree_dist = 0
+        while len(unvisited_corners) > 1:
+            # Find the closest pair of unvisited corners
+            min_inter_corner_dist = float('inf')
+            closest_corner_pair = None
+            
+            for i in range(len(unvisited_corners)):
+                for j in range(i+1, len(unvisited_corners)):
+                    dist = abs(unvisited_corners[i][0] - unvisited_corners[j][0]) + \
+                           abs(unvisited_corners[i][1] - unvisited_corners[j][1])
+                    if dist < min_inter_corner_dist:
+                        min_inter_corner_dist = dist
+                        closest_corner_pair = (i, j)
+            
+            # Add the minimum distance and remove one of the corners
+            min_spanning_tree_dist += min_inter_corner_dist
+            unvisited_corners.pop(closest_corner_pair[1])
+        
+        return min_dist_to_corner + min_spanning_tree_dist
+    
+    return min_dist_to_corner
 
 class AStarCornersAgent(SearchAgent):
     "A SearchAgent for FoodSearchProblem using A* and your foodHeuristic"
