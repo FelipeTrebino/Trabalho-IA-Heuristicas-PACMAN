@@ -38,6 +38,8 @@ from typing import List, Tuple, Any
 from game import Directions
 from game import Agent
 from game import Actions
+import networkx as ntx
+import matplotlib.pyplot as plt
 import util
 import time
 import search
@@ -306,10 +308,14 @@ class CornersProblem(search.SearchProblem):
         """
         Stores the walls, pacman's starting position and corners.
         """
-        self.walls = startingGameState.getWalls()
+        self.walls = startingGameState.getWalls()    
         self.startingPosition = startingGameState.getPacmanPosition()
         top, right = self.walls.height-2, self.walls.width-2
         self.corners = ((1,1), (1,top), (right, 1), (right, top))
+        self.graph = build_grid_graph(self.walls)
+                   
+        #visualize_grid_graph(self.graph, self.corners)
+                    
         for corner in self.corners:
             if not startingGameState.hasFood(*corner):
                 print('Warning: no food in corner ' + str(corner))
@@ -367,46 +373,50 @@ class CornersProblem(search.SearchProblem):
             if self.walls[x][y]: return 999999
         return len(actions)
 
-
 def cornersHeuristic(state, problem):
+    """
+    Improved heuristic for the CornersProblem, combining nearest corner distance and MST cost.
+
+    Args:
+        state: A tuple containing the current position and visited corners.
+        problem: The CornersProblem instance, containing the graph and corners.
+
+    Returns:
+        A heuristic value estimating the cost to visit all remaining corners.
+    """
     position, visited_corners = state
-    
+
+    # Access the graph and corners from the problem
+    graph = problem.graph
+    all_corners = problem.corners
+
     # Find unvisited corners
-    unvisited_corners = [corner for corner, is_visited in zip(problem.corners, visited_corners) if not is_visited]
-    
+    unvisited_corners = [corner for corner, is_visited in zip(all_corners, visited_corners) if not is_visited]
+
     # If all corners are visited, return 0
     if not unvisited_corners:
         return 0
-    
-    # Compute the minimum distance to the closest unvisited corner
-    min_dist_to_corner = min(
-        abs(position[0] - corner[0]) + abs(position[1] - corner[1]) 
+
+    # Step 1: Compute the shortest distance to the nearest unvisited corner
+    nearest_corner_distance = min(
+        ntx.shortest_path_length(graph, source=position, target=corner, weight="weight")
         for corner in unvisited_corners
     )
-    
+
+    # Step 2: Include the MST cost for the unvisited corners
     if len(unvisited_corners) > 1:
-        # Use the minimum spanning tree distance as an estimate
-        min_spanning_tree_dist = 0
-        while len(unvisited_corners) > 1:
-            # Find the closest pair of unvisited corners
-            min_inter_corner_dist = float('inf')
-            closest_corner_pair = None
-            
-            for i in range(len(unvisited_corners)):
-                for j in range(i+1, len(unvisited_corners)):
-                    dist = abs(unvisited_corners[i][0] - unvisited_corners[j][0]) + \
-                           abs(unvisited_corners[i][1] - unvisited_corners[j][1])
-                    if dist < min_inter_corner_dist:
-                        min_inter_corner_dist = dist
-                        closest_corner_pair = (i, j)
-            
-            # Add the minimum distance and remove one of the corners
-            min_spanning_tree_dist += min_inter_corner_dist
-            unvisited_corners.pop(closest_corner_pair[1])
-        
-        return min_dist_to_corner + min_spanning_tree_dist
-    
-    return min_dist_to_corner
+        nodes_to_consider = unvisited_corners
+        subgraph = graph.subgraph(nodes_to_consider)
+        mst_cost = ntx.minimum_spanning_tree(subgraph, weight="weight").size(weight="weight")
+    else:
+        mst_cost = 0
+
+    # Step 3: Combine nearest corner distance and MST cost
+    # Adjust weights as needed to balance nearest corner vs. MST influence
+    heuristic_value = nearest_corner_distance + mst_cost
+    return heuristic_value
+
+
 
 class AStarCornersAgent(SearchAgent):
     "A SearchAgent for FoodSearchProblem using A* and your foodHeuristic"
@@ -497,7 +507,6 @@ def foodHeuristic(state: Tuple[Tuple, List[List]], problem: FoodSearchProblem):
     "*** YOUR CODE HERE ***"
     return 0
 
-
 class ClosestDotSearchAgent(SearchAgent):
     "Search for all food using a sequence of searches"
     def registerInitialState(self, state):
@@ -582,3 +591,48 @@ def mazeDistance(point1: Tuple[int, int], point2: Tuple[int, int], gameState: pa
     assert not walls[x2][y2], 'point2 is a wall: ' + str(point2)
     prob = PositionSearchProblem(gameState, start=point1, goal=point2, warn=False, visualize=False)
     return len(search.bfs(prob))
+
+def build_grid_graph(walls):
+    graph = ntx.Graph()
+
+    # Get grid dimensions
+    width, height = walls.width, walls.height
+
+    # Iterate over each cell in the grid
+    for x in range(width):
+        for y in range(height):
+            if not walls[x][y]:  # Only consider free cells
+                # Add a node for the current cell
+                graph.add_node((x, y))
+
+                # Check neighbors (up, down, left, right)
+                for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                    nx, ny = x + dx, y + dy
+                    if 0 <= nx < width and 0 <= ny < height and not walls[nx][ny]:
+                        # Add an edge to the neighbor if it's free
+                        graph.add_edge((x, y), (nx, ny))
+
+    return graph
+
+
+def visualize_grid_graph(graph):
+    # Use the graph's nodes as positions
+    pos = {node: (node[1], -node[0]) for node in graph.nodes}  # Flip y for better visualization
+    
+    plt.figure(figsize=(8, 8))
+    
+    # Draw the graph
+    ntx.draw(graph, pos, node_size=10, with_labels=False, edge_color='gray', alpha=0.7)
+    
+    # Add a grid-like background for context
+    x_coords = [pos[node][0] for node in graph.nodes]
+    y_coords = [pos[node][1] for node in graph.nodes]
+    plt.xticks(range(min(x_coords), max(x_coords) + 1), fontsize=8)
+    plt.yticks(range(min(y_coords), max(y_coords) + 1), fontsize=8)
+    plt.grid(color='black', linestyle='--', linewidth=0.5, alpha=0.5)
+    
+    plt.title("Grid Graph Visualization", fontsize=14)
+    plt.gca().set_aspect('equal', adjustable='box')
+    plt.show()
+
+
