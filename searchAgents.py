@@ -291,8 +291,6 @@ def euclideanHeuristic(position, problem, info={}):
     xy2 = problem.goal
     return ( (xy1[0] - xy2[0]) ** 2 + (xy1[1] - xy2[1]) ** 2 ) ** 0.5
 
-
-
 #####################################################
 # This portion is incomplete.  Time to write code!  #
 #####################################################
@@ -313,7 +311,12 @@ class CornersProblem(search.SearchProblem):
         top, right = self.walls.height-2, self.walls.width-2
         self.corners = ((1,1), (1,top), (right, 1), (right, top))
         self.graph = build_grid_graph(self.walls)
-                   
+        
+        # Precompute shortest paths for all relevant nodes
+        key_nodes = [self.startingPosition] + list(self.corners)
+        self.shortest_paths = preprocess_all_pairs_paths(self.graph, key_nodes)
+
+        
         #visualize_grid_graph(self.graph, self.corners)
                     
         for corner in self.corners:
@@ -375,48 +378,69 @@ class CornersProblem(search.SearchProblem):
 
 def cornersHeuristic(state, problem):
     """
-    Improved heuristic for the CornersProblem, combining nearest corner distance and MST cost.
+    Estima o custo restante para visitar todos os cantos não visitados usando:
+    - Distância ao canto mais próximo.
+    - Custo da Árvore Geradora Mínima (MST) para conectar os cantos restantes.
 
     Args:
-        state: A tuple containing the current position and visited corners.
-        problem: The CornersProblem instance, containing the graph and corners.
+        state: Um estado contendo a posição atual (x, y) e os cantos já visitados.
+        problem: Uma instância do CornersProblem com o grafo e dados precomputados.
 
     Returns:
-        A heuristic value estimating the cost to visit all remaining corners.
+        Um valor heurístico (estimativa do custo restante).
     """
+
+    # Extrai a posição atual e os cantos visitados do estado
     position, visited_corners = state
 
-    # Access the graph and corners from the problem
-    graph = problem.graph
-    all_corners = problem.corners
+    # Acessa os caminhos precomputados e os cantos do problema
+    shortest_paths = problem.shortest_paths  # Dicionário com os menores caminhos entre pares de nós
+    all_corners = problem.corners  # Lista de todos os cantos
 
-    # Find unvisited corners
+    # Identifica os cantos que ainda não foram visitados
     unvisited_corners = [corner for corner, is_visited in zip(all_corners, visited_corners) if not is_visited]
 
-    # If all corners are visited, return 0
+    # Se todos os cantos foram visitados, o custo estimado é 0
     if not unvisited_corners:
         return 0
 
-    # Step 1: Compute the shortest distance to the nearest unvisited corner
-    nearest_corner_distance = min(
-        ntx.shortest_path_length(graph, source=position, target=corner, weight="weight")
-        for corner in unvisited_corners
-    )
+    # Passo 1: Calcula a distância até o canto não visitado mais próximo
+    nearest_corner_distance = float('inf')  # Inicializa com infinito
+    for corner in unvisited_corners:
+        if (position, corner) in shortest_paths:
+            # Se a distância já está precomputada, utiliza o valor armazenado
+            dist = shortest_paths[(position, corner)]
+        else:
+            # Caso contrário, calcula dinamicamente a distância
+            try:
+                dist = ntx.shortest_path_length(problem.graph, source=position, target=corner, weight="weight")
+                # Armazena a distância calculada no cache para evitar cálculos futuros
+                shortest_paths[(position, corner)] = dist
+                shortest_paths[(corner, position)] = dist
+            except ntx.NetworkXNoPath:
+                # Se não houver caminho, define a distância como infinita
+                dist = float('inf')
+        # Atualiza a menor distância encontrada
+        nearest_corner_distance = min(nearest_corner_distance, dist)
 
-    # Step 2: Include the MST cost for the unvisited corners
+    # Passo 2: Calcula o custo da Árvore Geradora Mínima (MST) para os cantos restantes
     if len(unvisited_corners) > 1:
-        nodes_to_consider = unvisited_corners
-        subgraph = graph.subgraph(nodes_to_consider)
+        # Cria um subgrafo contendo apenas os cantos não visitados
+        subgraph = ntx.Graph()
+        for i, node1 in enumerate(unvisited_corners):
+            for node2 in unvisited_corners[i + 1:]:
+                # Adiciona as arestas entre os cantos com os custos precomputados
+                cost = shortest_paths[(node1, node2)]
+                subgraph.add_edge(node1, node2, weight=cost)
+
+        # Calcula o custo total da MST no subgrafo
         mst_cost = ntx.minimum_spanning_tree(subgraph, weight="weight").size(weight="weight")
     else:
+        # Se houver apenas um canto restante, não há MST; o custo é 0
         mst_cost = 0
 
-    # Step 3: Combine nearest corner distance and MST cost
-    # Adjust weights as needed to balance nearest corner vs. MST influence
-    heuristic_value = nearest_corner_distance + mst_cost
-    return heuristic_value
-
-
+    # Retorna o valor heurístico como a soma da distância ao canto mais próximo e o custo da MST
+    return nearest_corner_distance + mst_cost
 
 class AStarCornersAgent(SearchAgent):
     "A SearchAgent for FoodSearchProblem using A* and your foodHeuristic"
@@ -614,17 +638,20 @@ def build_grid_graph(walls):
 
     return graph
 
-
 def visualize_grid_graph(graph):
-    # Use the graph's nodes as positions
+    """
+    Visualiza um grafo em forma de grade usando matplotlib e NetworkX.
+    
+    Args:
+        graph: Um objeto NetworkX representando o grafo a ser visualizado.
+    """
+    
     pos = {node: (node[1], -node[0]) for node in graph.nodes}  # Flip y for better visualization
     
     plt.figure(figsize=(8, 8))
     
-    # Draw the graph
     ntx.draw(graph, pos, node_size=10, with_labels=False, edge_color='gray', alpha=0.7)
     
-    # Add a grid-like background for context
     x_coords = [pos[node][0] for node in graph.nodes]
     y_coords = [pos[node][1] for node in graph.nodes]
     plt.xticks(range(min(x_coords), max(x_coords) + 1), fontsize=8)
@@ -634,5 +661,32 @@ def visualize_grid_graph(graph):
     plt.title("Grid Graph Visualization", fontsize=14)
     plt.gca().set_aspect('equal', adjustable='box')
     plt.show()
+
+def preprocess_all_pairs_paths(graph, nodes):
+    """
+    Precomputa os caminhos mais curtos entre todos os pares de nós fornecidos.
+
+    Args:
+        graph: Um objeto networkx.Graph que representa o grafo da grade.
+        nodes: Lista como posição inicial e cantos para calcular os caminhos.
+
+    Returns:
+        Um dicionário onde as chaves são pares de nós (tuplas) e os valores são os comprimentos dos caminhos mais curtos entre esses nós.
+    """
+    shortest_paths = {}  # Dicionário para armazenar os caminhos mais curtos entre pares de nós.
+
+    # Computa o caminho mais curto para todos os pares de nós na lista fornecida.
+    for i, node1 in enumerate(nodes):
+        for j in range(i + 1, len(nodes)):  # Para evitar redundância, considera pares únicos.
+            node2 = nodes[j]  # Pega o segundo nó do par.
+            # Usa o método algoritmo de dijkstra para calcular o comprimento do caminho mais curto entre node1 e node2.
+            path_length = ntx.shortest_path_length(graph, source=node1, target=node2, weight="weight")
+
+            # Armazena o comprimento do caminho mais curto no dicionário.
+            # Adiciona em ambas as direções, pois o grafo é não-direcionado.
+            shortest_paths[(node1, node2)] = path_length
+            shortest_paths[(node2, node1)] = path_length
+            
+    return shortest_paths  # Retorna o dicionário de caminhos mais curtos.
 
 
