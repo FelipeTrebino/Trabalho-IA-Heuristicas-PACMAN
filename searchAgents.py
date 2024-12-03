@@ -369,44 +369,65 @@ class CornersProblem(search.SearchProblem):
 
 
 def cornersHeuristic(state, problem):
+    """
+    Usa:
+    - Distância mínima ao canto mais próximo (heurística de Manhattan).
+    - Soma aproximada das distâncias entre os cantos restantes, usando um algoritmo guloso.
+
+    Args:
+        state: Um estado contendo a posição atual (x, y) e os cantos visitados.
+        problem: Instância do CornersProblem.
+
+    Returns:
+        Um valor heurístico que estima o custo restante para completar o problema.
+    """
     position, visited_corners = state
-    
-    # Find unvisited corners
+
+    # Identifica os cantos que ainda não foram visitados
     unvisited_corners = [corner for corner, is_visited in zip(problem.corners, visited_corners) if not is_visited]
-    
-    # If all corners are visited, return 0
+
+    # Se todos os cantos já foram visitados, o custo restante é 0
     if not unvisited_corners:
         return 0
-    
-    # Compute the minimum distance to the closest unvisited corner
+
+    # Calcula a menor distância de Manhattan da posição atual para qualquer canto não visitado
     min_dist_to_corner = min(
-        abs(position[0] - corner[0]) + abs(position[1] - corner[1]) 
+        abs(position[0] - corner[0]) + abs(position[1] - corner[1])  # Distância de Manhattan
         for corner in unvisited_corners
     )
-    
+
+    # Caso existam vários cantos não visitados, estima o custo para conectar todos
     if len(unvisited_corners) > 1:
-        # Use the minimum spanning tree distance as an estimate
-        min_spanning_tree_dist = 0
+        # Inicializa o custo total para conectar os cantos restantes
+        min_dist = 0
+
+        # Utiliza um algoritmo guloso para aproximar a soma das distâncias entre os cantos
         while len(unvisited_corners) > 1:
-            # Find the closest pair of unvisited corners
+            # Inicializa a menor distância entre pares de cantos
             min_inter_corner_dist = float('inf')
             closest_corner_pair = None
-            
+
+            # Encontra o par de cantos mais próximos
             for i in range(len(unvisited_corners)):
-                for j in range(i+1, len(unvisited_corners)):
+                for j in range(i + 1, len(unvisited_corners)):
                     dist = abs(unvisited_corners[i][0] - unvisited_corners[j][0]) + \
-                           abs(unvisited_corners[i][1] - unvisited_corners[j][1])
+                           abs(unvisited_corners[i][1] - unvisited_corners[j][1])  # Distância de Manhattan
                     if dist < min_inter_corner_dist:
                         min_inter_corner_dist = dist
                         closest_corner_pair = (i, j)
-            
-            # Add the minimum distance and remove one of the corners
-            min_spanning_tree_dist += min_inter_corner_dist
+
+            # Adiciona a menor distância ao custo total
+            min_dist += min_inter_corner_dist
+
+            # Remove um dos cantos conectados (comportamento guloso)
             unvisited_corners.pop(closest_corner_pair[1])
-        
-        return min_dist_to_corner + min_spanning_tree_dist
-    
+
+        # Retorna a soma da distância até o canto mais próximo e o custo total calculado
+        return min_dist_to_corner + min_dist
+
+    # Se houver apenas um canto não visitado, retorna a distância até ele
     return min_dist_to_corner
+
 
 class AStarCornersAgent(SearchAgent):
     "A SearchAgent for FoodSearchProblem using A* and your foodHeuristic"
