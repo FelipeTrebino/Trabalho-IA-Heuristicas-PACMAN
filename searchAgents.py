@@ -302,23 +302,33 @@ class CornersProblem(search.SearchProblem):
     You must select a suitable state space and successor function
     """
 
-    def __init__(self, startingGameState: pacman.GameState):
-        """
-        Stores the walls, pacman's starting position and corners.
-        """
-        self.walls = startingGameState.getWalls()    
+    def __init__(self, startingGameState):
+        
+        # Inicializa paredes, posição inicial e cantos
+        self.walls = startingGameState.getWalls()
         self.startingPosition = startingGameState.getPacmanPosition()
-        top, right = self.walls.height-2, self.walls.width-2
-        self.corners = ((1,1), (1,top), (right, 1), (right, top))
-        self.graph = build_grid_graph(self.walls)
-        
-        # Precompute shortest paths for all relevant nodes
-        key_nodes = [self.startingPosition] + list(self.corners)
-        self.shortest_paths = preprocess_all_pairs_paths(self.graph, key_nodes)
+        top, right = self.walls.height - 2, self.walls.width - 2
+        self.corners = [(1, 1), (1, top), (right, 1), (right, top)]
 
-        
-        #visualize_grid_graph(self.graph, self.corners)
-                    
+        # Garante que todos os cantos são acessíveis
+        for corner in self.corners:
+            if startingGameState.hasWall(corner[0], corner[1]):
+                raise Exception(f"Canto inacessível: {corner}")
+
+        # Construir o grafo completo da grade
+        full_graph = build_grid_graph(self.walls)
+
+        # Seleciona os nós relevantes (posição inicial + cantos)
+        key_nodes = [self.startingPosition] + list(self.corners)
+
+        # Extrai o subgrafo relevante
+        self.graph = build_corners_subgraph(full_graph,key_nodes)
+
+        # Pre calcula o menor caminho entre os cantos
+        self.shortest_paths = preprocess_all_pairs_paths(self.graph, self.corners)
+
+        #visualize_grid_graph(self.graph)
+                
         for corner in self.corners:
             if not startingGameState.hasFood(*corner):
                 print('Warning: no food in corner ' + str(corner))
@@ -377,14 +387,51 @@ class CornersProblem(search.SearchProblem):
         return len(actions)
 
 def cornersHeuristic(state, problem):
+    position, visited_corners = state
+
+    # Identifica os cantos que ainda não foram visitados
+    unvisited_corners = [corner for corner, is_visited in zip(problem.corners, visited_corners) if not is_visited]
+
+    # Se todos os cantos foram visitados, o custo estimado é 0
+    if not unvisited_corners:
+        return 0
+
+    # Calcula a distância ao canto mais próximo
+    nearest_corner_distance = float('inf')
+    for corner in unvisited_corners:
+        if (position, corner) not in problem.shortest_paths:
+            # Calcula dinamicamente se necessário
+            try:
+                dist = ntx.shortest_path_length(problem.graph, source=position, target=corner, weight="weight")
+                problem.shortest_paths[(position, corner)] = dist
+                problem.shortest_paths[(corner, position)] = dist
+            except:
+                dist = float('inf') 
+        else:
+            dist = problem.shortest_paths[(position, corner)]
+        nearest_corner_distance = min(nearest_corner_distance, dist)
+
+    # Calcula o custo da MST para os cantos não visitados
+    if len(unvisited_corners) > 1:
+        subgraph = problem.graph.subgraph(unvisited_corners)
+        mst_cost = ntx.minimum_spanning_tree(subgraph, weight="weight").size(weight="weight")
+    else:
+        mst_cost = 0
+
+    # Retorna a soma da distância ao canto mais próximo e o custo da MST
+    return nearest_corner_distance + mst_cost
+
+
     """
-    Estima o custo restante para visitar todos os cantos não visitados usando:
+    Estima o custo restante para visitar todos os cantos não visitados.
+
+    Usa:
     - Distância ao canto mais próximo.
-    - Custo da Árvore Geradora Mínima (MST) para conectar os cantos restantes.
+    - Caminhos precomputados na sub-árvore para conectar os cantos restantes.
 
     Args:
         state: Um estado contendo a posição atual (x, y) e os cantos já visitados.
-        problem: Uma instância do CornersProblem com o grafo e dados precomputados.
+        problem: Uma instância do CornersProblem com os menores caminhos precomputados.
 
     Returns:
         Um valor heurístico (estimativa do custo restante).
@@ -393,53 +440,31 @@ def cornersHeuristic(state, problem):
     # Extrai a posição atual e os cantos visitados do estado
     position, visited_corners = state
 
-    # Acessa os caminhos precomputados e os cantos do problema
-    shortest_paths = problem.shortest_paths  # Dicionário com os menores caminhos entre pares de nós
-    all_corners = problem.corners  # Lista de todos os cantos
-
     # Identifica os cantos que ainda não foram visitados
-    unvisited_corners = [corner for corner, is_visited in zip(all_corners, visited_corners) if not is_visited]
+    unvisited_corners = [corner for corner, is_visited in zip(problem.corners, visited_corners) if not is_visited]
 
     # Se todos os cantos foram visitados, o custo estimado é 0
     if not unvisited_corners:
         return 0
 
-    # Passo 1: Calcula a distância até o canto não visitado mais próximo
-    nearest_corner_distance = float('inf')  # Inicializa com infinito
-    for corner in unvisited_corners:
-        if (position, corner) in shortest_paths:
-            # Se a distância já está precomputada, utiliza o valor armazenado
-            dist = shortest_paths[(position, corner)]
-        else:
-            # Caso contrário, calcula dinamicamente a distância
-            try:
-                dist = ntx.shortest_path_length(problem.graph, source=position, target=corner, weight="weight")
-                # Armazena a distância calculada no cache para evitar cálculos futuros
-                shortest_paths[(position, corner)] = dist
-                shortest_paths[(corner, position)] = dist
-            except ntx.NetworkXNoPath:
-                # Se não houver caminho, define a distância como infinita
-                dist = float('inf')
-        # Atualiza a menor distância encontrada
-        nearest_corner_distance = min(nearest_corner_distance, dist)
+    # Calcula a distância até o canto mais próximo usando os caminhos precomputados
+    nearest_corner_distance = min(
+        problem.shortest_paths[(position, corner)] for corner in unvisited_corners
+    )
 
-    # Passo 2: Calcula o custo da Árvore Geradora Mínima (MST) para os cantos restantes
+    # Se houver mais de um canto não visitado, calcula o custo para conectá-los
     if len(unvisited_corners) > 1:
-        # Cria um subgrafo contendo apenas os cantos não visitados
-        subgraph = ntx.Graph()
-        for i, node1 in enumerate(unvisited_corners):
-            for node2 in unvisited_corners[i + 1:]:
-                # Adiciona as arestas entre os cantos com os custos precomputados
-                cost = shortest_paths[(node1, node2)]
-                subgraph.add_edge(node1, node2, weight=cost)
-
-        # Calcula o custo total da MST no subgrafo
-        mst_cost = ntx.minimum_spanning_tree(subgraph, weight="weight").size(weight="weight")
+        # Soma os custos dos caminhos entre os cantos não visitados
+        mst_cost = sum(
+            problem.shortest_paths[(corner1, corner2)]
+            for i, corner1 in enumerate(unvisited_corners)
+            for corner2 in unvisited_corners[i + 1:]
+        ) / 2  # Evita contar o caminho duas vezes
     else:
-        # Se houver apenas um canto restante, não há MST; o custo é 0
+        # Apenas um canto não visitado, o custo adicional é zero
         mst_cost = 0
 
-    # Retorna o valor heurístico como a soma da distância ao canto mais próximo e o custo da MST
+    # Retorna o valor heurístico como a soma da distância ao canto mais próximo e o custo restante
     return nearest_corner_distance + mst_cost
 
 class AStarCornersAgent(SearchAgent):
@@ -617,26 +642,41 @@ def mazeDistance(point1: Tuple[int, int], point2: Tuple[int, int], gameState: pa
     return len(search.bfs(prob))
 
 def build_grid_graph(walls):
+    """
+    Constrói um grafo a partir de uma grade (grid), onde cada célula livre é um nó 
+    e arestas conectam células adjacentes que também são livres.
+
+    Args:
+        walls: Objeto que representa as paredes da grade. Pode ser acessado como walls[x][y],
+               retornando True para uma parede e False para uma célula livre.
+
+    Returns:
+        graph: Um grafo NetworkX representando a grade, onde os nós são células livres
+               e as arestas representam conexões entre células adjacentes.
+    """
+    # Inicializa um grafo vazio
     graph = ntx.Graph()
 
-    # Get grid dimensions
+    # Obtém as dimensões da grade
     width, height = walls.width, walls.height
 
-    # Iterate over each cell in the grid
+    # Itera sobre cada célula na grade
     for x in range(width):
         for y in range(height):
-            if not walls[x][y]:  # Only consider free cells
-                # Add a node for the current cell
+            if not walls[x][y]:  # Apenas considera células livres (sem paredes)
+                # Adiciona um nó para a célula atual
                 graph.add_node((x, y))
 
-                # Check neighbors (up, down, left, right)
+                # Verifica os vizinhos da célula atual (cima, baixo, esquerda, direita)
                 for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                    nx, ny = x + dx, y + dy
+                    nx, ny = x + dx, y + dy  # Calcula a posição do vizinho
+                    # Adiciona uma aresta se o vizinho está dentro da grade e é uma célula livre
                     if 0 <= nx < width and 0 <= ny < height and not walls[nx][ny]:
-                        # Add an edge to the neighbor if it's free
-                        graph.add_edge((x, y), (nx, ny))
+                        graph.add_edge((x, y), (nx, ny))  # Conecta a célula atual ao vizinho
 
+    # Retorna o grafo resultante
     return graph
+
 
 def visualize_grid_graph(graph):
     """
@@ -689,4 +729,31 @@ def preprocess_all_pairs_paths(graph, nodes):
             
     return shortest_paths  # Retorna o dicionário de caminhos mais curtos.
 
+def build_corners_subgraph(full_graph, corners):
+    """
+    Constrói um subgrafo contendo todos os menores caminhos entre os cantos.
+
+    Args:
+        full_graph: Grafo completo representando o labirinto.
+        corners: Lista com os 4 cantos (tuplas de coordenadas).
+
+    Returns:
+        subgraph: Um subgrafo com os menores caminhos entre os cantos.
+    """
+    subgraph = ntx.Graph()
+
+    # Calcula os menores caminhos entre todos os pares de cantos
+    for i, corner1 in enumerate(corners):
+        for corner2 in corners[i + 1:]:
+            try:
+                # Encontra o menor caminho entre os dois cantos
+                path = ntx.shortest_path(full_graph, source=corner1, target=corner2, weight="weight")
+
+                # Adiciona todos os nós e arestas do caminho ao subgrafo
+                ntx.add_path(subgraph, path)
+            except ntx.NetworkXNoPath:
+                # Se não houver caminho, levanta uma exceção
+                raise ValueError(f"Sem caminho entre {corner1} e {corner2} no grafo completo!")
+
+    return subgraph
 

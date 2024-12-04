@@ -208,7 +208,6 @@ def uniformCostSearch(problem: SearchProblem) -> List[Directions]:
 
     return actions
 
-
 def nullHeuristic(state, problem=None) -> float:
     """
     A heuristic function estimates the cost from the current state to the nearest
