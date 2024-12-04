@@ -436,53 +436,6 @@ def cornersHeuristic(state, problem):
     # Retorna a soma da distância ao canto mais próximo e o custo da MST
     return nearest_corner_distance + mst_cost
 
-
-
-    """
-    Estima o custo restante para visitar todos os cantos não visitados.
-
-    Usa:
-    - Distância ao canto mais próximo.
-    - Caminhos precomputados na sub-árvore para conectar os cantos restantes.
-
-    Args:
-        state: Um estado contendo a posição atual (x, y) e os cantos já visitados.
-        problem: Uma instância do CornersProblem com os menores caminhos precomputados.
-
-    Returns:
-        Um valor heurístico (estimativa do custo restante).
-    """
-
-    # Extrai a posição atual e os cantos visitados do estado
-    position, visited_corners = state
-
-    # Identifica os cantos que ainda não foram visitados
-    unvisited_corners = [corner for corner, is_visited in zip(problem.corners, visited_corners) if not is_visited]
-
-    # Se todos os cantos foram visitados, o custo estimado é 0
-    if not unvisited_corners:
-        return 0
-
-    # Calcula a distância até o canto mais próximo usando os caminhos precomputados
-    nearest_corner_distance = min(
-        problem.shortest_paths[(position, corner)] for corner in unvisited_corners
-    )
-
-    # Se houver mais de um canto não visitado, calcula o custo para conectá-los
-    if len(unvisited_corners) > 1:
-        # Soma os custos dos caminhos entre os cantos não visitados
-        mst_cost = sum(
-            problem.shortest_paths[(corner1, corner2)]
-            for i, corner1 in enumerate(unvisited_corners)
-            for corner2 in unvisited_corners[i + 1:]
-        ) / 2  # Evita contar o caminho duas vezes
-    else:
-        # Apenas um canto não visitado, o custo adicional é zero
-        mst_cost = 0
-
-    # Retorna o valor heurístico como a soma da distância ao canto mais próximo e o custo restante
-    return nearest_corner_distance + mst_cost
-
 class AStarCornersAgent(SearchAgent):
     "A SearchAgent for FoodSearchProblem using A* and your foodHeuristic"
     def __init__(self):
