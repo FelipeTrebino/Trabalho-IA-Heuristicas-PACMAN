@@ -387,6 +387,17 @@ class CornersProblem(search.SearchProblem):
         return len(actions)
 
 def cornersHeuristic(state, problem):
+    """
+    Estima o custo restante para visitar todos os cantos não visitados.
+    Armazena dinamicamente os caminhos calculados para otimizar futuras chamadas.
+
+    Args:
+        state: Um estado contendo a posição atual (x, y) e os cantos já visitados.
+        problem: Uma instância do CornersProblem com o grafo e dados precomputados.
+
+    Returns:
+        Um valor heurístico estimando o custo restante para completar o problema.
+    """
     position, visited_corners = state
 
     # Identifica os cantos que ainda não foram visitados
@@ -400,19 +411,23 @@ def cornersHeuristic(state, problem):
     nearest_corner_distance = float('inf')
     for corner in unvisited_corners:
         if (position, corner) not in problem.shortest_paths:
-            # Calcula dinamicamente se necessário
+            # Calcula dinamicamente se necessário e armazena
             try:
                 dist = ntx.shortest_path_length(problem.graph, source=position, target=corner, weight="weight")
+                # Salvar nas duas direções
                 problem.shortest_paths[(position, corner)] = dist
                 problem.shortest_paths[(corner, position)] = dist
-            except:
-                dist = float('inf') 
+            except Exception:
+                dist = float('inf')  # Define como infinito caso não haja caminho válido
         else:
             dist = problem.shortest_paths[(position, corner)]
+
+        # Atualiza a menor distância encontrada
         nearest_corner_distance = min(nearest_corner_distance, dist)
 
-    # Calcula o custo da MST para os cantos não visitados
+    # Calcula o custo da MST para conectar os cantos não visitados
     if len(unvisited_corners) > 1:
+        # Usa o subgrafo da grade, incluindo apenas os cantos não visitados
         subgraph = problem.graph.subgraph(unvisited_corners)
         mst_cost = ntx.minimum_spanning_tree(subgraph, weight="weight").size(weight="weight")
     else:
@@ -420,6 +435,7 @@ def cornersHeuristic(state, problem):
 
     # Retorna a soma da distância ao canto mais próximo e o custo da MST
     return nearest_corner_distance + mst_cost
+
 
 
     """
