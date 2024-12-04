@@ -327,6 +327,7 @@ class CornersProblem(search.SearchProblem):
         # Pre calcula o menor caminho entre os cantos
         self.shortest_paths = preprocess_all_pairs_paths(self.graph, self.corners)
 
+        # Descomente para visualizar o grafo com o menor caminho entre os cantos
         #visualize_grid_graph(self.graph)
                 
         for corner in self.corners:
